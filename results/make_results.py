@@ -10,17 +10,38 @@ import pandas as pd
 from src.data.etf_loader import load_clean_prices
 from src.backtest.engine import run_backtest
 from run_strategies import (
-    run_regime_strategy,
     run_rotation_strategy,
     summarize,
 )
+from src.data.macro_loader import load_tnx_10y, load_vix
+from src.signals.regime import compute_monthly_features, classify_regime
+from src.signals.ls_biotech_pharma import compute_spread_momentum, build_monthly_ls_weights
+from src.portfolio.vol_target import estimate_rolling_vol
 
 
 def main() -> None:
     results_dir = Path(__file__).resolve().parent
     prices = load_clean_prices().dropna(how="any")
 
-    regime_bt, _ = run_regime_strategy(prices, tc_bps=10.0, start=None, end=None)
+    # Build regime LS with current macro and spread momentum/vol
+    price_slice = prices[["XBI", "XPH", "SPY"]].dropna()
+    tnx = load_tnx_10y(start=price_slice.index.min().strftime("%Y-%m-%d"), end=price_slice.index.max().strftime("%Y-%m-%d")).reindex(price_slice.index).ffill()
+    vix = load_vix(start=price_slice.index.min().strftime("%Y-%m-%d"), end=price_slice.index.max().strftime("%Y-%m-%d")).reindex(price_slice.index).ffill()
+    features = compute_monthly_features(tnx, price_slice["SPY"], vix)
+    regimes = classify_regime(features)
+    spread_mom = compute_spread_momentum(price_slice[["XBI", "XPH"]], lookback_months=6)
+    vol_df = estimate_rolling_vol(price_slice[["XBI", "XPH"]].pct_change().fillna(0.0))
+    ls_weights = build_monthly_ls_weights(
+        regime_labels=regimes,
+        prices=price_slice[["XBI", "XPH"]],
+        vol_df=vol_df,
+        spread_momentum=spread_mom,
+        target_gross_exposure=1.0,
+        spread_mom_threshold=0.0,
+    )
+    from src.backtest.engine import run_backtest
+    regime_bt = run_backtest(price_slice[["XBI", "XPH"]], ls_weights, transaction_cost_bps=10.0)
+
     rotation_bt = run_rotation_strategy(prices, tc_bps=10.0)
 
     summaries = [

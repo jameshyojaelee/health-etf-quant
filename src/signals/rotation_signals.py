@@ -81,7 +81,10 @@ def build_monthly_rotation_weights(
             continue
 
         winners = eligible_scores.nlargest(min(top_k, len(eligible_scores))).index.tolist()
-        current_vols = vol_df.loc[date, winners].replace(0.0, pd.NA).dropna()
+        if date in vol_df.index:
+            current_vols = vol_df.loc[date, winners].replace(0.0, pd.NA).dropna()
+        else:
+            current_vols = vol_df.loc[:date, winners].iloc[-1].replace(0.0, pd.NA).dropna()
         if current_vols.empty:
             monthly_weights.append(pd.Series(weights, name=date))
             continue
