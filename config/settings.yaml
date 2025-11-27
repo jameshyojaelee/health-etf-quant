@@ -1,0 +1,20 @@
+# Centralized YAML settings for data handling and strategy defaults.
+data:
+  start_date: "2006-07-01"
+  end_date: null
+  tickers: ["XBI", "XPH", "IHF", "IHI", "XLV", "SPY"]
+
+backtest:
+  frequency: "D"  # daily
+  transaction_cost_bps: 10  # 0.10% per round trip as default
+
+regime_strategy:
+  rebalance_frequency: "M"
+  lookback_months_rate: 6
+  lookback_months_spy: 6
+  vix_threshold: 25.0
+
+rotation_strategy:
+  momentum_lookback_months: 6
+  top_k: 2
+  target_vol_annual: 0.10
