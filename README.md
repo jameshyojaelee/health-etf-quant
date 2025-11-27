@@ -198,6 +198,16 @@ Edit:
 * `config/settings.yaml`
 * `src/config.py`
 
+### 6.3 Download Data
+
+Data downloads are handled programmatically—no manual steps required:
+
+- **ETFs:** `src/data/etf_loader.load_clean_prices()` calls `yfinance.download`, caches raw prices to `data_raw/etf_prices_raw.csv`, cleans/ffills, and writes `data_processed/etf_prices_clean.csv`.
+- **Quick refresh:** run `python run_strategies.py` or open `notebooks/01_data_sanity.ipynb`; both trigger the ETF download/cache if files are missing.
+- **Macro/FF factors:** placeholders are wired; drop processed macro/factor CSVs into `data_processed/` (e.g., `ff_factors_monthly.csv`) when available.
+
+If you need to force a redownload, delete the cached CSVs in `data_raw/` and `data_processed/` and rerun the script/notebook.
+
 to change:
 
 * ETF universe
