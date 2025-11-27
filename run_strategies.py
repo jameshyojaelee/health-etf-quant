@@ -143,17 +143,20 @@ def main() -> None:
     summaries = []
     bench = []
     strategy_returns: Dict[str, pd.Series] = {}
+    strategy_equity: Dict[str, pd.Series] = {}
 
     if args.strategy in ("regime", "both"):
         regime_bt, risk_on_frac = run_regime_strategy(prices, tc_bps=args.tc_bps, start=args.start, end=args.end)
         summaries.append(summarize("Regime LS", regime_bt.daily_returns, regime_bt.equity_curve))
         strategy_returns["Regime LS"] = regime_bt.daily_returns
+        strategy_equity["Regime LS"] = regime_bt.equity_curve
         print(f"Regime risk-on fraction: {risk_on_frac:.1%}")
 
     if args.strategy in ("rotation", "both"):
         rotation_bt = run_rotation_strategy(prices, tc_bps=args.tc_bps)
         summaries.append(summarize("Rotation", rotation_bt.daily_returns, rotation_bt.equity_curve))
         strategy_returns["Rotation"] = rotation_bt.daily_returns
+        strategy_equity["Rotation"] = rotation_bt.equity_curve
 
     # Benchmarks
     if "XLV" in prices.columns:
@@ -183,6 +186,18 @@ def main() -> None:
         print("\nBenchmarks:")
         for m in bench:
             print_summary(m)
+
+    if args.split_year and strategy_returns:
+        split_date = pd.Timestamp(year=args.split_year, month=12, day=31)
+        print(f"\nTrain/Test split at {split_date.date()}:")
+        for name, rets in strategy_returns.items():
+            splits = summarize_split(name, rets, split_date)
+            train = splits["train"]
+            test = splits["test"]
+            print(
+                f"{name} train: CAGR {train['cagr']:.2%}, Sharpe {train['sharpe']:.2f}; "
+                f"test: CAGR {test['cagr']:.2%}, Sharpe {test['sharpe']:.2f}"
+            )
 
     # Factor regression if data available
     try:
