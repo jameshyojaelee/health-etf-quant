@@ -49,3 +49,36 @@ def build_vol_target_weights(
     for t in selected_tickers:
         weights[t] = float(scaled_weights.get(t, 0.0))
     return weights
+
+
+def scale_weights_to_target_vol(
+    risk_weights: dict[str, float],
+    current_vols: pd.Series,
+    target_vol_annual: float,
+    max_gross_leverage: float = 1.5,
+) -> dict[str, float]:
+    """Scale risk weights to hit a target portfolio vol with a leverage cap.
+
+    Assumes zero correlations: portfolio_vol ≈ sqrt(sum(w_i^2 * vol_i^2)).
+    """
+    if current_vols.empty or not risk_weights:
+        return {k: 0.0 for k in risk_weights}
+
+    w = pd.Series(risk_weights, dtype=float).reindex(current_vols.index).fillna(0.0)
+    vols = current_vols.reindex(w.index).astype(float)
+    if vols.isna().all() or w.abs().sum() == 0:
+        return {k: 0.0 for k in risk_weights}
+
+    unscaled_var = ((w ** 2) * (vols ** 2)).sum()
+    if unscaled_var <= 0 or pd.isna(unscaled_var):
+        return {k: 0.0 for k in risk_weights}
+
+    unscaled_vol = float(unscaled_var ** 0.5)
+    scale = target_vol_annual / unscaled_vol if target_vol_annual and unscaled_vol else 0.0
+    scaled_w = w * scale
+
+    gross = scaled_w.abs().sum()
+    if gross > max_gross_leverage and gross > 0:
+        scaled_w *= max_gross_leverage / gross
+
+    return {k: float(v) for k, v in scaled_w.items()}

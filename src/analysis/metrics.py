@@ -44,3 +44,39 @@ def compute_max_drawdown(equity_curve: pd.Series) -> float:
     drawdowns = equity_curve / running_max - 1.0
     max_drawdown = drawdowns.min()
     return float(abs(max_drawdown))
+
+
+def compute_information_ratio(
+    strategy_returns: pd.Series,
+    benchmark_returns: pd.Series,
+) -> float:
+    """Information ratio based on active returns vs benchmark."""
+    aligned = pd.concat([strategy_returns, benchmark_returns], axis=1, join="inner").dropna()
+    if aligned.shape[0] < 2:
+        return np.nan
+    active = aligned.iloc[:, 0] - aligned.iloc[:, 1]
+    if active.std(ddof=0) == 0:
+        return np.nan
+    return float(active.mean() / active.std(ddof=0))
+
+
+def compute_correlation(series_a: pd.Series, series_b: pd.Series) -> float:
+    """Pearson correlation between two aligned series."""
+    aligned = pd.concat([series_a, series_b], axis=1, join="inner").dropna()
+    if aligned.shape[0] < 2:
+        return np.nan
+    return float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
+
+
+def compute_blended_returns(
+    base_returns: pd.Series,
+    overlay_returns: pd.Series,
+    overlay_weight: float = 0.1,
+) -> pd.Series:
+    """Blend base and overlay returns (e.g., 90% XLV + 10% LS)."""
+    aligned = pd.concat([base_returns, overlay_returns], axis=1, join="inner").dropna()
+    if aligned.empty:
+        return pd.Series(dtype=float)
+    base = aligned.iloc[:, 0]
+    overlay = aligned.iloc[:, 1]
+    return (1 - overlay_weight) * base + overlay_weight * overlay
