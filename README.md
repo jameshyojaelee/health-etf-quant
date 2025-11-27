@@ -245,19 +245,3 @@ This runs both strategies end-to-end and prints summary metrics.
 * More robust risk-parity and drawdown controls
 * Incorporating credit spreads or liquidity indicators
 * More systematic signal combination (momentum + valuation + quality)
-
----
-
-**This repository is designed to demonstrate practical, defensible quantitative work — not just strategy results — in a form that aligns with what hedge fund data and research teams expect in early-stage candidates.**
-
-```
-
----
-
-If you want, I can also generate:
-
-- A shorter “PM-facing” version for LinkedIn/GitHub description  
-- A version with collapsible Markdown sections  
-- A version with embedded images once you have plots
-```
-
