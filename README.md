@@ -1,6 +1,6 @@
 # Healthcare ETF Quant Strategies
 
-Systematic strategies on US healthcare ETFs designed to showcase practical skills in data engineering, quantitative research, and risk analysis for a hedge fund data associate or quant research role.
+Systematic strategies on US healthcare ETFs designed to showcase practical skills in data engineering, quantitative research, and risk analysis
 
 This project implements and evaluates two complementary strategies:
 

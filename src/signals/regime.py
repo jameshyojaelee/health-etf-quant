@@ -16,9 +16,9 @@ def compute_monthly_features(
     - spy_prices: SPY adjusted close prices (total return proxy).
     - vix: VIX index levels.
     """
-    tnx_m = tnx_yield.resample("M").last()
-    spy_m = spy_prices.resample("M").last()
-    vix_m = vix.resample("M").mean()
+    tnx_m = tnx_yield.resample("ME").last()
+    spy_m = spy_prices.resample("ME").last()
+    vix_m = vix.resample("ME").mean()
 
     delta_rate_6m = tnx_m.diff(6)
     spy_return_6m = spy_m.pct_change(6)
@@ -37,7 +37,7 @@ def compute_monthly_features(
 
 def classify_regime(
     monthly_features: pd.DataFrame,
-    rate_threshold: float = -0.5,
+    rate_threshold: float = 0.0,
     vix_threshold: float = 25.0,
     spy_ret_threshold: float = 0.0,
 ) -> pd.Series:

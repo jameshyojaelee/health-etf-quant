@@ -7,7 +7,7 @@ import pandas as pd
 
 def compute_monthly_total_return(prices: pd.DataFrame) -> pd.DataFrame:
     """Resample daily adjusted prices to month-end and compute simple returns."""
-    monthly_prices = prices.resample("M").last()
+    monthly_prices = prices.resample("ME").last()
     monthly_returns = monthly_prices.pct_change()
     return monthly_returns
 

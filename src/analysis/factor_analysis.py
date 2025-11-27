@@ -13,7 +13,7 @@ def align_strategy_and_factors(
     ff_factors_monthly: pd.DataFrame,
 ) -> Tuple[pd.Series, pd.DataFrame]:
     """Convert daily strategy returns to monthly and align with Fama-French factors."""
-    strat_monthly = strategy_returns_daily.resample("M").apply(lambda r: (1 + r).prod() - 1)
+    strat_monthly = strategy_returns_daily.resample("ME").apply(lambda r: (1 + r).prod() - 1)
     # RF is usually in percent; convert to decimal if values look like percent
     factors = ff_factors_monthly.copy()
     if factors["RF"].abs().max() > 0.5:  # heuristic: >50bps likely percentage

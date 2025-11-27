@@ -15,7 +15,7 @@ def build_monthly_rotation_weights(
     target_vol_annual: float = 0.10,
 ) -> pd.DataFrame:
     """Construct daily weights for a momentum-driven, vol-targeted rotation strategy."""
-    monthly_prices = prices.resample("M").last()
+    monthly_prices = prices.resample("ME").last()
     momentum_scores = compute_momentum_signal(monthly_prices, lookback_months=lookback_months)
 
     daily_returns = prices.pct_change().fillna(0.0)

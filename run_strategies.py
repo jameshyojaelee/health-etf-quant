@@ -33,6 +33,9 @@ from src.analysis.metrics import (
     compute_max_drawdown,
     compute_sharpe,
 )
+from src.data.macro_loader import load_tnx_10y, load_vix
+from src.analysis.factor_analysis import align_strategy_and_factors, run_ff_regression
+from src.data.ff_factors import load_ff_factors_monthly
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,28 +71,34 @@ def print_summary(metrics: Dict[str, float]) -> None:
     )
 
 
-def build_synthetic_macro(prices: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Create simple placeholder macro series (TNX, SPY, VIX) for regime logic.
+def fetch_macro_series(
+    start: str | None,
+    end: str | None,
+    price_index: pd.DatetimeIndex,
+) -> tuple[pd.Series, pd.Series]:
+    """Download TNX (10Y yield) and VIX levels and align to price calendar."""
+    start_date = start or price_index.min().strftime("%Y-%m-%d")
+    end_date = end or price_index.max().strftime("%Y-%m-%d")
+    tnx = load_tnx_10y(start=start_date, end=end_date)
+    vix = load_vix(start=start_date, end=end_date)
+    tnx = tnx.reindex(price_index).ffill()
+    vix = vix.reindex(price_index).ffill()
+    tnx.name = "TNX"
+    vix.name = "VIX"
+    return tnx, vix
 
-    Replace with real loaders when available; this stays deterministic for quick tests.
-    """
-    idx = prices.index
-    spy_prices = prices.get("SPY") if "SPY" in prices.columns else prices.iloc[:, 0]
-    tnx_yield = pd.Series(0.03 + 0.005 * np.sin(np.linspace(0, 6, len(idx))), index=idx, name="TNX")
-    spy_ret = spy_prices.pct_change().fillna(0)
-    vix = (20 + 80 * spy_ret.abs().rolling(21, min_periods=1).mean()).clip(10, 60)
-    return tnx_yield, spy_prices, vix
 
-
-def run_regime_strategy(prices: pd.DataFrame, tc_bps: float):
+def run_regime_strategy(prices: pd.DataFrame, tc_bps: float, start: str | None, end: str | None):
     """Run regime-based long-short between XBI and XPH."""
     price_slice = prices[["XBI", "XPH", "SPY"]].dropna()
-    tnx_yield, spy_prices, vix = build_synthetic_macro(price_slice)
+    tnx_yield, vix = fetch_macro_series(start=start, end=end, price_index=price_slice.index)
+    spy_prices = price_slice["SPY"]
     features = compute_monthly_features(tnx_yield, spy_prices, vix)
-    regimes = classify_regime(features)
+    regimes = classify_regime(features, rate_threshold=0.0, vix_threshold=25.0, spy_ret_threshold=0.0)
     weights = build_monthly_ls_weights(regimes, price_slice.index)
     bt = run_backtest(price_slice[["XBI", "XPH"]], weights, transaction_cost_bps=tc_bps)
-    return bt
+    risk_on_frac = regimes.mean()
+    return bt, risk_on_frac
 
 
 def run_rotation_strategy(prices: pd.DataFrame, tc_bps: float):
@@ -111,18 +120,62 @@ def main() -> None:
 
     print("Running strategies with transaction_cost_bps=", args.tc_bps)
     summaries = []
+    bench = []
+    strategy_returns: Dict[str, pd.Series] = {}
 
     if args.strategy in ("regime", "both"):
-        regime_bt = run_regime_strategy(prices, tc_bps=args.tc_bps)
+        regime_bt, risk_on_frac = run_regime_strategy(prices, tc_bps=args.tc_bps, start=args.start, end=args.end)
         summaries.append(summarize("Regime LS", regime_bt.daily_returns, regime_bt.equity_curve))
+        strategy_returns["Regime LS"] = regime_bt.daily_returns
+        print(f"Regime risk-on fraction: {risk_on_frac:.1%}")
 
     if args.strategy in ("rotation", "both"):
         rotation_bt = run_rotation_strategy(prices, tc_bps=args.tc_bps)
         summaries.append(summarize("Rotation", rotation_bt.daily_returns, rotation_bt.equity_curve))
+        strategy_returns["Rotation"] = rotation_bt.daily_returns
+
+    # Benchmarks
+    if "XLV" in prices.columns:
+        w = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+        w["XLV"] = 1.0
+        bench_bt = run_backtest(prices[w.columns], w, transaction_cost_bps=0.0)
+        bench.append(summarize("Buy&Hold XLV", bench_bt.daily_returns, bench_bt.equity_curve))
+    if "SPY" in prices.columns:
+        w = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+        w["SPY"] = 1.0
+        bench_bt = run_backtest(prices[w.columns], w, transaction_cost_bps=0.0)
+        bench.append(summarize("Buy&Hold SPY", bench_bt.daily_returns, bench_bt.equity_curve))
+
+    # Equal-weight healthcare basket (monthly rebalance)
+    hc_cols = [c for c in ["XBI", "XPH", "IHF", "IHI", "XLV"] if c in prices.columns]
+    if hc_cols:
+        month_ends = prices.resample("ME").last().index
+        ew_monthly = pd.DataFrame(1 / len(hc_cols), index=month_ends, columns=hc_cols)
+        ew_daily = ew_monthly.reindex(prices.index, method="ffill").fillna(0.0)
+        ew_bt = run_backtest(prices[hc_cols], ew_daily, transaction_cost_bps=args.tc_bps)
+        bench.append(summarize("Equal-Weight HC", ew_bt.daily_returns, ew_bt.equity_curve))
 
     print("\nStrategy Summary:")
     for m in summaries:
         print_summary(m)
+    if bench:
+        print("\nBenchmarks:")
+        for m in bench:
+            print_summary(m)
+
+    # Factor regression if data available
+    try:
+        ff = load_ff_factors_monthly()
+        print("\nFactor Regression (monthly excess returns vs FF5):")
+        for name, daily_ret in strategy_returns.items():
+            strat_excess, ff_aligned = align_strategy_and_factors(daily_ret, ff)
+            reg = run_ff_regression(strat_excess, ff_aligned)
+            print(
+                f"{name}: alpha={reg['alpha_annual']:.2%} (t={reg['alpha_tstat']:.2f}), "
+                f"R^2={reg['r2']:.3f}, n={reg['n_obs']}"
+            )
+    except FileNotFoundError:
+        print("\nFama-French factor file not found; skip factor regression.")
 
 
 if __name__ == "__main__":
