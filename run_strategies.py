@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
         default="both",
         help="Select which strategy to run",
     )
+    parser.add_argument("--split_year", type=int, default=None, help="Optional train/test split year (e.g., 2015)")
     return parser.parse_args()
 
 
@@ -60,6 +61,26 @@ def summarize(name: str, daily_returns: pd.Series, equity_curve: pd.Series) -> D
         "vol": compute_annual_vol(daily_returns),
         "sharpe": compute_sharpe(daily_returns),
         "max_dd": compute_max_drawdown(equity_curve),
+    }
+
+
+def summarize_split(name: str, daily_returns: pd.Series, split_date: pd.Timestamp) -> Dict[str, Dict[str, float]]:
+    """Compute train/test metrics split at split_date."""
+    train = daily_returns.loc[:split_date]
+    test = daily_returns.loc[split_date + pd.Timedelta(days=1) :]
+    return {
+        "train": {
+            "cagr": compute_cagr(train),
+            "vol": compute_annual_vol(train),
+            "sharpe": compute_sharpe(train),
+            "max_dd": compute_max_drawdown((1 + train.fillna(0)).cumprod()),
+        },
+        "test": {
+            "cagr": compute_cagr(test),
+            "vol": compute_annual_vol(test),
+            "sharpe": compute_sharpe(test),
+            "max_dd": compute_max_drawdown((1 + test.fillna(0)).cumprod()),
+        },
     }
 
 
