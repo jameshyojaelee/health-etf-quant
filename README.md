@@ -208,6 +208,26 @@ Data downloads are handled programmatically—no manual steps required:
 
 If you need to force a redownload, delete the cached CSVs in `data_raw/` and `data_processed/` and rerun the script/notebook.
 
+### 6.4 Reproduce Results Snapshot
+
+```bash
+python results/make_results.py          # regenerate CSV + plots in results/
+python run_strategies.py --tc_bps 10    # print metrics; add --split_year 2015 for train/test
+```
+
+Artifacts:
+- `results/strategy_summary.csv`
+- `results/equity_curves.png`
+- `results/metrics_bar.png`
+- `results/results.ipynb` (renders summary + plots)
+
+Current headline numbers (10 bps costs, full sample):
+- Rotation: CAGR ~4.8%, Sharpe ~0.62
+- Regime LS: CAGR ~3.3%, Sharpe ~0.38
+- Benchmarks: XLV Sharpe ~0.69, SPY ~0.63, equal-weight HC ~0.63
+
+![Equity Curves](results/equity_curves.png)
+
 to change:
 
 * ETF universe
