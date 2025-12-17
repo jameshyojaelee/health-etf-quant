@@ -32,3 +32,6 @@ htmlcov/
 # Data outputs
 data_raw/
 data_processed/
+
+prompts.md
+Plan.md
