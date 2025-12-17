@@ -16,8 +16,12 @@ if str(ROOT) not in sys.path:
 from src.analysis.metrics import (  # noqa: E402
     compute_annual_vol,
     compute_cagr,
+    compute_calmar,
+    compute_down_capture,
     compute_max_drawdown,
     compute_sharpe,
+    compute_sortino,
+    compute_up_capture,
 )
 
 
@@ -35,3 +39,25 @@ def test_basic_metrics_constant_returns():
     assert annual_vol == pytest.approx(0.0, abs=1e-12)
     assert np.isnan(sharpe)
     assert max_dd == pytest.approx(0.0, abs=1e-12)
+
+
+def test_sortino_calmar_and_capture_ratios():
+    # Create two months: one up month, one down month.
+    dates = pd.date_range("2020-01-01", "2020-02-28", freq="B")
+    strat = pd.Series(0.0, index=dates)
+    bench = pd.Series(0.0, index=dates)
+
+    strat.loc["2020-01"] = 0.001
+    bench.loc["2020-01"] = 0.001
+    strat.loc["2020-02"] = -0.001
+    bench.loc["2020-02"] = -0.001
+
+    sortino = compute_sortino(strat)
+    calmar = compute_calmar(strat)
+    up = compute_up_capture(strat, bench)
+    down = compute_down_capture(strat, bench)
+
+    assert not np.isnan(sortino)
+    assert not np.isnan(calmar)
+    assert up == pytest.approx(1.0, rel=1e-12)
+    assert down == pytest.approx(1.0, rel=1e-12)

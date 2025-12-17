@@ -6,23 +6,41 @@ import numpy as np
 import pandas as pd
 from pandas import Series, DataFrame
 
+from src.portfolio.vol_target import estimate_rolling_vol
+
 
 def build_monthly_ls_weights_simple(
     regime_labels: pd.Series,
     dates: pd.DatetimeIndex,
-    tickers_ls: list[str] | None = None,
+    long_ticker: str = "XBI",
+    short_ticker: str = "XPH",
+    risk_off_mode: str = "flat",
 ) -> pd.DataFrame:
-    """Legacy simple mapping: risk-on equals +1/-1 notional, risk-off flat."""
-    tickers = tickers_ls or ["XBI", "XPH"]
-    if set(tickers) != {"XBI", "XPH"}:
-        raise ValueError("tickers_ls must include XBI and XPH.")
+    """Simple mapping: risk-on equals long/short spread, risk-off configurable.
+
+    Parameters
+    ----------
+    risk_off_mode:
+        - "flat": 0 exposure in risk-off months (default)
+        - "long_pharma": go long the defensive leg (pharma) only
+        - "reverse": flip the spread (short biotech, long pharma)
+    """
+    if risk_off_mode not in {"flat", "long_pharma", "reverse"}:
+        raise ValueError("risk_off_mode must be one of {'flat','long_pharma','reverse'}.")
+
+    tickers = [long_ticker, short_ticker]
 
     monthly_weights = []
     for date, label in regime_labels.items():
         if label == 1:
-            monthly_weights.append(pd.Series({"XBI": 1.0, "XPH": -1.0}, name=date))
+            monthly_weights.append(pd.Series({long_ticker: 1.0, short_ticker: -1.0}, name=date))
         else:
-            monthly_weights.append(pd.Series({"XBI": 0.0, "XPH": 0.0}, name=date))
+            if risk_off_mode == "flat":
+                monthly_weights.append(pd.Series({long_ticker: 0.0, short_ticker: 0.0}, name=date))
+            elif risk_off_mode == "long_pharma":
+                monthly_weights.append(pd.Series({long_ticker: 0.0, short_ticker: 1.0}, name=date))
+            else:  # "reverse"
+                monthly_weights.append(pd.Series({long_ticker: -1.0, short_ticker: 1.0}, name=date))
 
     monthly_df = pd.DataFrame(monthly_weights)
 
@@ -79,7 +97,7 @@ def compute_risk_balanced_ls_weights(
     return {long_ticker: float(w_long), short_ticker: -float(w_short)}
 
 
-def build_monthly_ls_weights(
+def _build_monthly_ls_weights_risk_balanced(
     regime_labels: Series,
     prices: DataFrame,
     vol_df: DataFrame,
@@ -120,3 +138,68 @@ def build_monthly_ls_weights(
     daily_weights = monthly_df.reindex(prices.index, method="ffill").fillna(0.0)
     daily_weights = daily_weights.reindex(columns=prices.columns, fill_value=0.0)
     return daily_weights
+
+
+def build_monthly_ls_weights(
+    regime_labels: Series,
+    dates: pd.DatetimeIndex | None = None,
+    *,
+    prices: DataFrame | None = None,
+    vol_df: DataFrame | None = None,
+    spread_momentum: Series | None = None,
+    long_ticker: str = "XBI",
+    short_ticker: str = "XPH",
+    target_gross_exposure: float = 1.0,
+    spread_mom_threshold: float = 0.0,
+    risk_off_mode: str = "flat",
+    spread_mom_lookback_months: int = 6,
+    vol_lookback_days: int = 60,
+) -> DataFrame:
+    """Build daily long/short weights for the biotech–pharma spread.
+
+    This function is intentionally *backward compatible* with the repo's earlier
+    API while supporting a more advanced sizing path:
+
+    1) **Simple mapping** (legacy):
+       - Call as `build_monthly_ls_weights(regime_labels, dates)`
+       - Uses `build_monthly_ls_weights_simple` with constant +/- 1 notional
+         when risk-on and configurable behavior when risk-off.
+
+    2) **Risk-balanced + momentum-gated** (recommended for deeper research):
+       - Call with `prices=...` and optionally `vol_df=...`, `spread_momentum=...`
+       - Sizes legs by inverse vol and only takes risk when spread momentum is
+         above `spread_mom_threshold`.
+    """
+    if prices is None:
+        if dates is None:
+            raise ValueError("Provide either `dates` (simple mode) or `prices` (risk-balanced mode).")
+        return build_monthly_ls_weights_simple(
+            regime_labels=regime_labels,
+            dates=dates,
+            long_ticker=long_ticker,
+            short_ticker=short_ticker,
+            risk_off_mode=risk_off_mode,
+        )
+
+    # Risk-balanced path
+    if vol_df is None:
+        daily_returns = prices.pct_change().fillna(0.0)
+        vol_df = estimate_rolling_vol(daily_returns, lookback_days=vol_lookback_days)
+    if spread_momentum is None:
+        spread_momentum = compute_spread_momentum(
+            prices,
+            long_ticker=long_ticker,
+            short_ticker=short_ticker,
+            lookback_months=spread_mom_lookback_months,
+        )
+
+    return _build_monthly_ls_weights_risk_balanced(
+        regime_labels=regime_labels,
+        prices=prices,
+        vol_df=vol_df,
+        spread_momentum=spread_momentum,
+        long_ticker=long_ticker,
+        short_ticker=short_ticker,
+        target_gross_exposure=target_gross_exposure,
+        spread_mom_threshold=spread_mom_threshold,
+    )

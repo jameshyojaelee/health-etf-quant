@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+from src import config as project_config
 from src.data.etf_loader import load_clean_prices
 from src.signals.regime import classify_regime, compute_monthly_features
 from src.signals.ls_biotech_pharma import build_monthly_ls_weights
@@ -42,7 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run healthcare ETF strategies end-to-end.")
     parser.add_argument("--start", type=str, default=None, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--tc_bps", type=float, default=10.0, help="Transaction cost in bps per round trip")
+    parser.add_argument(
+        "--tc_bps",
+        type=float,
+        default=project_config.DEFAULT_TRANSACTION_COST_BPS,
+        help="Transaction cost in bps per round trip",
+    )
     parser.add_argument(
         "--strategy",
         choices=["regime", "rotation", "both"],
@@ -50,6 +56,53 @@ def parse_args() -> argparse.Namespace:
         help="Select which strategy to run",
     )
     parser.add_argument("--split_year", type=int, default=None, help="Optional train/test split year (e.g., 2015)")
+
+    # Regime strategy parameters (defaults can be set in config/settings.yaml)
+    parser.add_argument(
+        "--rate_lookback_months",
+        type=int,
+        default=project_config.REGIME_LOOKBACK_MONTHS_RATE,
+        help="Lookback (months) for 10Y yield change",
+    )
+    parser.add_argument(
+        "--spy_lookback_months",
+        type=int,
+        default=project_config.REGIME_LOOKBACK_MONTHS_SPY,
+        help="Lookback (months) for SPY return",
+    )
+    parser.add_argument("--rate_threshold", type=float, default=0.0, help="Risk-on if delta_rate <= threshold")
+    parser.add_argument("--spy_ret_threshold", type=float, default=0.0, help="Risk-on if SPY return >= threshold")
+    parser.add_argument(
+        "--vix_threshold",
+        type=float,
+        default=project_config.REGIME_VIX_THRESHOLD,
+        help="Risk-on if VIX <= threshold",
+    )
+    parser.add_argument(
+        "--risk_off_mode",
+        choices=["flat", "long_pharma", "reverse"],
+        default="flat",
+        help="Risk-off behavior for the LS spread",
+    )
+
+    # Rotation strategy parameters (defaults can be set in config/settings.yaml)
+    parser.add_argument(
+        "--momentum_lookback_months",
+        type=int,
+        default=project_config.ROTATION_MOMENTUM_LOOKBACK_MONTHS,
+        help="Momentum lookback (months) when not using 12-1 momentum",
+    )
+    parser.add_argument("--top_k", type=int, default=project_config.ROTATION_TOP_K, help="Select top K ETFs by momentum")
+    parser.add_argument(
+        "--target_vol_annual",
+        type=float,
+        default=project_config.ROTATION_TARGET_VOL_ANNUAL,
+        help="Target annualized volatility",
+    )
+    parser.add_argument("--max_gross_leverage", type=float, default=1.5, help="Max gross exposure cap")
+    parser.add_argument("--no_ts_mom_gating", action="store_true", help="Disable per-asset TS momentum gating")
+    parser.add_argument("--no_xlv_trend_filter", action="store_true", help="Disable XLV trend (risk-off) filter")
+    parser.add_argument("--no_12m1m", action="store_true", help="Use simple lookback momentum instead of 12-1")
     return parser.parse_args()
 
 
@@ -109,24 +162,68 @@ def fetch_macro_series(
     return tnx, vix
 
 
-def run_regime_strategy(prices: pd.DataFrame, tc_bps: float, start: str | None, end: str | None):
+def run_regime_strategy(
+    prices: pd.DataFrame,
+    tc_bps: float,
+    start: str | None,
+    end: str | None,
+    *,
+    rate_lookback_months: int = project_config.REGIME_LOOKBACK_MONTHS_RATE,
+    spy_lookback_months: int = project_config.REGIME_LOOKBACK_MONTHS_SPY,
+    rate_threshold: float = 0.0,
+    vix_threshold: float = project_config.REGIME_VIX_THRESHOLD,
+    spy_ret_threshold: float = 0.0,
+    risk_off_mode: str = "flat",
+):
     """Run regime-based long-short between XBI and XPH."""
     price_slice = prices[["XBI", "XPH", "SPY"]].dropna()
     tnx_yield, vix = fetch_macro_series(start=start, end=end, price_index=price_slice.index)
     spy_prices = price_slice["SPY"]
-    features = compute_monthly_features(tnx_yield, spy_prices, vix)
-    regimes = classify_regime(features, rate_threshold=0.0, vix_threshold=25.0, spy_ret_threshold=0.0)
-    weights = build_monthly_ls_weights(regimes, price_slice.index)
+    features = compute_monthly_features(
+        tnx_yield,
+        spy_prices,
+        vix,
+        lookback_months_rate=rate_lookback_months,
+        lookback_months_spy=spy_lookback_months,
+        vix_window_months=1,
+    )
+    regimes = classify_regime(
+        features,
+        rate_threshold=rate_threshold,
+        vix_threshold=vix_threshold,
+        spy_ret_threshold=spy_ret_threshold,
+    )
+    weights = build_monthly_ls_weights(regimes, price_slice.index, risk_off_mode=risk_off_mode)
     bt = run_backtest(price_slice[["XBI", "XPH"]], weights, transaction_cost_bps=tc_bps)
     risk_on_frac = regimes.mean()
     return bt, risk_on_frac
 
 
-def run_rotation_strategy(prices: pd.DataFrame, tc_bps: float):
+def run_rotation_strategy(
+    prices: pd.DataFrame,
+    tc_bps: float,
+    *,
+    momentum_lookback_months: int = project_config.ROTATION_MOMENTUM_LOOKBACK_MONTHS,
+    top_k: int = project_config.ROTATION_TOP_K,
+    target_vol_annual: float = project_config.ROTATION_TARGET_VOL_ANNUAL,
+    use_12m1m: bool = True,
+    use_ts_mom_gating: bool = True,
+    use_xlv_trend_filter: bool = True,
+    max_gross_leverage: float = 1.5,
+):
     """Run momentum + vol-targeted rotation across healthcare ETFs."""
     tickers = ["XBI", "XPH", "IHF", "IHI", "XLV"]
     price_slice = prices[tickers].dropna()
-    weights = build_monthly_rotation_weights(price_slice)
+    weights = build_monthly_rotation_weights(
+        price_slice,
+        lookback_months=momentum_lookback_months,
+        top_k=top_k,
+        target_vol_annual=target_vol_annual,
+        use_12m1m=use_12m1m,
+        use_ts_mom_gating=use_ts_mom_gating,
+        use_xlv_trend_filter=use_xlv_trend_filter,
+        max_gross_leverage=max_gross_leverage,
+    )
     bt = run_backtest(price_slice, weights, transaction_cost_bps=tc_bps)
     return bt
 
@@ -146,14 +243,35 @@ def main() -> None:
     strategy_equity: Dict[str, pd.Series] = {}
 
     if args.strategy in ("regime", "both"):
-        regime_bt, risk_on_frac = run_regime_strategy(prices, tc_bps=args.tc_bps, start=args.start, end=args.end)
+        regime_bt, risk_on_frac = run_regime_strategy(
+            prices,
+            tc_bps=args.tc_bps,
+            start=args.start,
+            end=args.end,
+            rate_lookback_months=args.rate_lookback_months,
+            spy_lookback_months=args.spy_lookback_months,
+            rate_threshold=args.rate_threshold,
+            vix_threshold=args.vix_threshold,
+            spy_ret_threshold=args.spy_ret_threshold,
+            risk_off_mode=args.risk_off_mode,
+        )
         summaries.append(summarize("Regime LS", regime_bt.daily_returns, regime_bt.equity_curve))
         strategy_returns["Regime LS"] = regime_bt.daily_returns
         strategy_equity["Regime LS"] = regime_bt.equity_curve
         print(f"Regime risk-on fraction: {risk_on_frac:.1%}")
 
     if args.strategy in ("rotation", "both"):
-        rotation_bt = run_rotation_strategy(prices, tc_bps=args.tc_bps)
+        rotation_bt = run_rotation_strategy(
+            prices,
+            tc_bps=args.tc_bps,
+            momentum_lookback_months=args.momentum_lookback_months,
+            top_k=args.top_k,
+            target_vol_annual=args.target_vol_annual,
+            use_12m1m=not args.no_12m1m,
+            use_ts_mom_gating=not args.no_ts_mom_gating,
+            use_xlv_trend_filter=not args.no_xlv_trend_filter,
+            max_gross_leverage=args.max_gross_leverage,
+        )
         summaries.append(summarize("Rotation", rotation_bt.daily_returns, rotation_bt.equity_curve))
         strategy_returns["Rotation"] = rotation_bt.daily_returns
         strategy_equity["Rotation"] = rotation_bt.equity_curve
