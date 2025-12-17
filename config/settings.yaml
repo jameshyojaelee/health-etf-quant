@@ -8,6 +8,10 @@ backtest:
   frequency: "D"  # daily
   transaction_cost_bps: 10  # 0.10% per round trip as default
 
+macro:
+  source: "yahoo"  # yahoo|fred
+  fred_api_key: null
+
 regime_strategy:
   rebalance_frequency: "M"
   lookback_months_rate: 6

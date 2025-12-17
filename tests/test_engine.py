@@ -68,3 +68,29 @@ def test_turnover_and_transaction_costs():
 
     assert np.allclose(result.daily_returns.values, expected_daily.values)
     assert np.allclose(result.turnover.values, expected_turnover.values)
+
+
+def test_borrow_cost_reduces_returns_for_shorts():
+    dates = pd.date_range("2020-01-01", periods=3, freq="D")
+    prices = pd.DataFrame({"A": [100.0, 100.0, 100.0]}, index=dates)
+    weights = pd.DataFrame({"A": [-0.5, -0.5, -0.5]}, index=dates)
+
+    # Choose an annual borrow cost so the daily rate is exactly 10 bps.
+    borrow_cost_annual = 0.001 * 252
+    result = run_backtest(prices, weights, borrow_cost_annual=borrow_cost_annual)
+
+    expected_daily = pd.Series([0.0, -0.0005, -0.0005], index=dates)
+    assert np.allclose(result.daily_returns.values, expected_daily.values)
+
+
+def test_cash_rate_increases_returns_when_underinvested():
+    dates = pd.date_range("2020-01-01", periods=3, freq="D")
+    prices = pd.DataFrame({"A": [100.0, 100.0, 100.0]}, index=dates)
+    weights = pd.DataFrame({"A": [0.5, 0.5, 0.5]}, index=dates)
+
+    # Daily cash rate = 10 bps; cash weight is 50% after the first day due to shifting.
+    cash_rate_annual = 0.001 * 252
+    result = run_backtest(prices, weights, cash_rate_annual=cash_rate_annual)
+
+    expected_daily = pd.Series([0.0, 0.0005, 0.0005], index=dates)
+    assert np.allclose(result.daily_returns.values, expected_daily.values)

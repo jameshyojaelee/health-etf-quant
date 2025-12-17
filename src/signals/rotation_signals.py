@@ -27,6 +27,8 @@ def build_monthly_rotation_weights(
     xlv_ticker: str = "XLV",
     ts_lookback_months: int = 12,
     max_gross_leverage: float = 1.5,
+    defensive_ticker: str | None = None,
+    defensive_on_negative_momentum: bool = True,
 ) -> pd.DataFrame:
     """Construct daily weights for a momentum-driven, vol-targeted rotation strategy.
 
@@ -67,7 +69,17 @@ def build_monthly_rotation_weights(
             continue
 
         scores = row.dropna()
-        if scores.empty or scores.max() <= 0:
+        if scores.empty:
+            monthly_weights.append(pd.Series(weights, name=date))
+            continue
+
+        if scores.max() <= 0:
+            if (
+                defensive_on_negative_momentum
+                and defensive_ticker is not None
+                and defensive_ticker in prices.columns
+            ):
+                weights[defensive_ticker] = 1.0
             monthly_weights.append(pd.Series(weights, name=date))
             continue
 

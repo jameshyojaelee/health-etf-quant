@@ -96,3 +96,58 @@ def test_rotation_weights_basic_properties():
 
     last = weights.iloc[-1]
     assert (last.abs() > 0).sum() <= 1
+
+
+def test_rotation_all_cash_when_all_momentum_negative():
+    dates = pd.date_range("2020-01-01", "2020-06-30", freq="B")
+    n = len(dates)
+    prices = pd.DataFrame(
+        {
+            "XBI": np.linspace(100.0, 80.0, n),
+            "XPH": np.linspace(100.0, 90.0, n),
+            "IHF": np.linspace(100.0, 70.0, n),
+            "IHI": np.linspace(100.0, 85.0, n),
+            "XLV": np.linspace(100.0, 95.0, n),
+        },
+        index=dates,
+    )
+
+    weights = build_monthly_rotation_weights(
+        prices,
+        lookback_months=1,
+        top_k=1,
+        target_vol_annual=0.10,
+        use_12m1m=False,
+        use_ts_mom_gating=False,
+        use_xlv_trend_filter=False,
+    )
+    assert weights.iloc[-1].abs().sum() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_rotation_defensive_when_all_momentum_negative():
+    dates = pd.date_range("2020-01-01", "2020-06-30", freq="B")
+    n = len(dates)
+    prices = pd.DataFrame(
+        {
+            "XBI": np.linspace(100.0, 80.0, n),
+            "XPH": np.linspace(100.0, 90.0, n),
+            "IHF": np.linspace(100.0, 70.0, n),
+            "IHI": np.linspace(100.0, 85.0, n),
+            "XLV": np.linspace(100.0, 95.0, n),
+        },
+        index=dates,
+    )
+
+    weights = build_monthly_rotation_weights(
+        prices,
+        lookback_months=1,
+        top_k=1,
+        target_vol_annual=0.10,
+        use_12m1m=False,
+        use_ts_mom_gating=False,
+        use_xlv_trend_filter=False,
+        defensive_ticker="XLV",
+    )
+    last = weights.iloc[-1]
+    assert last["XLV"] == pytest.approx(1.0, rel=1e-12)
+    assert last.drop("XLV").abs().sum() == pytest.approx(0.0, abs=1e-12)

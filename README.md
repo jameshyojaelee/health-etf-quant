@@ -213,6 +213,7 @@ If you need to force a redownload, delete the cached CSVs in `data_raw/` and `da
 ```bash
 python results/make_results.py          # regenerate CSV + plots in results/
 python run_strategies.py --tc_bps 10    # print metrics; add --split_year 2015 for train/test
+python run_strategies.py --strategy rotation --defensive_ticker XLV   # allocate to XLV when all momentum scores <= 0
 ```
 
 Artifacts:

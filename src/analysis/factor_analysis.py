@@ -11,6 +11,8 @@ import statsmodels.api as sm
 def align_strategy_and_factors(
     strategy_returns_daily: pd.Series,
     ff_factors_monthly: pd.DataFrame,
+    *,
+    include_umd: bool = False,
 ) -> Tuple[pd.Series, pd.DataFrame]:
     """Convert daily strategy returns to monthly and align with Fama-French factors."""
     strat_monthly = strategy_returns_daily.resample("ME").apply(lambda r: (1 + r).prod() - 1)
@@ -21,6 +23,8 @@ def align_strategy_and_factors(
     aligned = strat_monthly.to_frame("strategy").join(factors, how="inner")
     strategy_excess = aligned["strategy"] - aligned["RF"]
     factor_cols = ["MKT_RF", "SMB", "HML", "RMW", "CMA"]
+    if include_umd and "UMD" in aligned.columns:
+        factor_cols.append("UMD")
     ff_aligned = aligned[factor_cols]
     return strategy_excess, ff_aligned
 
